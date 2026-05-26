@@ -50,7 +50,7 @@ vrrp_instance VI_SITE {
     }
 
     authentication {
-        auth_type PASS
+        auth_type PASS              # Use AH (IPSec) if both nodes are on the same network
         auth_pass <change_this>     # Must match on both nodes
     }
 

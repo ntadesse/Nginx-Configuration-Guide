@@ -86,8 +86,11 @@ upstream <upstream_name> {
 
 ######################################################################
 # 4. VIRTUAL HOST CONFIG
+# Each application is configured in a separate file for manageability.
 # vim /etc/nginx/conf.d/<app_name>.conf
 ######################################################################
+
+# --- PRIMARY CONFIG (used as template for each app) ---
 server {
   listen <PORT> ssl;
   server_name <app_name>.example.com;
@@ -145,6 +148,23 @@ server {
     proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
   }
 }
+
+# --- SECONDARY: Per-app files follow the same structure above ---
+# Each app gets its own pair of files:
+#   /etc/nginx/conf.d/app1.conf          + app1_upstream.conf
+#   /etc/nginx/conf.d/app2.conf          + app2_upstream.conf
+#   /etc/nginx/conf.d/app3.conf          + app3_upstream.conf
+#
+# Only the following values change per app:
+#   listen <PORT>          — unique port per app
+#   server_name            — app-specific hostname
+#   proxy_pass             — points to its own upstream block
+#   access_log / error_log — app-specific log files
+#
+# Use configure-nginx.sh to deploy each app automatically:
+#   ./configure-nginx.sh app1 app1_upstream 8081
+#   ./configure-nginx.sh app2 app2_upstream 8082
+#   ./configure-nginx.sh app3 app3_upstream 8083
 
 ######################################################################
 # 5. LOG ROTATION
