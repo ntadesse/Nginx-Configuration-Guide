@@ -37,6 +37,7 @@ nginx-configuration/
 │   └── conf.d/
 │       ├── app.conf                      # Virtual host (SSL + proxy)
 │       ├── cache.conf                    # Proxy micro-cache
+│       ├── status.conf                   # Nginx stub_status (metrics endpoint)
 │       └── upstream.conf                 # Backend pool
 ├── templates/
 │   ├── app.conf                          # Virtual host template for configure-nginx.sh
@@ -80,6 +81,7 @@ sudo nginx -t && sudo systemctl reload nginx   # Test and reload
 sudo systemctl status keepalived               # Keepalived status
 ip addr show                                   # Verify VIP is active
 sudo sysctl -p                                 # Apply kernel parameters
+curl http://127.0.0.1:8080/nginx_status        # Nginx metrics
 ```
 
 ---
