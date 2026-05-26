@@ -1,0 +1,335 @@
+/etc/nginx/
+ ├── nginx.conf
+ ├── conf.d/
+ │    ├── app01.conf
+ │    ├── app02.conf
+ │    ├── app03.conf
+ │    └── upstreams.conf
+ └── ssl/
+      ├── star.crt
+      └── star.key
+sudo nginx -t                #check configuration
+sudo systemctl reload nginx  #reload nginx configuration
+sudo systemctl restart nginx #restart nginx 
+sudo systemctl status nginx  #check status 
+
+###########################
+vim /etc/nginx/nginx.conf
+###########################
+user www-data;
+worker_processes auto;
+error_log /var/log/nginx/error.log notice;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+    
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+    access_log  /var/log/nginx/access.log  main;
+
+    sendfile        on;
+    tcp_nopush      on;
+    tcp_nodelay     on;
+    keepalive_timeout  65;
+
+    # --- SECURITY: Hide Nginx Version ---
+    server_tokens off; 
+
+    # --- SECURITY: Limit Body Size (Prevent Buffer Overflow/DoS) ---
+    # client_max_body_size 10M;
+
+    # --- PERFORMANCE: Enable Gzip Compression ---
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml;
+    gzip_min_length 1000;
+
+    # Include your split configs
+    include /etc/nginx/conf.d/*.conf;
+}
+
+#####################################
+vim /etc/nginx/conf.d/upstreams.conf
+#####################################
+# APP1 – Primary + DR with stickiness
+upstream app1_backend {
+    # ip_hash;                     # Session stickiness
+    # hash $remote_addr consistent
+    server 192.168.10.11:80 max_fails=3 fail_timeout=5s;
+    server 192.168.20.11:80 backup;   # backup=DR server
+    keepalive 32; #Keep 32 idle connections open to backend
+}
+
+# APP2 – Primary + DR with stickiness
+upstream app2_backend {
+    # ip_hash;
+    # hash $remote_addr consistent
+    server 192.168.10.12:80 max_fails=3 fail_timeout=5s;
+    server 192.168.20.12:80 backup;
+    keepalive 32; #Keep 32 idle connections open to backend
+}
+
+# APP3 – Primary + DR with stickiness
+upstream app3_backend {
+    # ip_hash;
+    # hash $remote_addr consistent
+    server 192.168.10.13:80 max_fails=3 fail_timeout=5s;
+    server 192.168.20.13:80 backup;
+    keepalive 32; #Keep 32 idle connections open to backend
+}
+
+#################################
+vim /etc/nginx/conf.d/cache.conf
+#################################
+proxy_cache_path /var/cache/nginx/microcache levels=1:2 keys_zone=microcache:50m max_size=2g inactive=60m use_temp_path=off;
+# proxy_cache_lock prevents multiple concurrent requests from hitting the backend for same miss
+proxy_cache_lock on;
+proxy_cache_lock_timeout 5s;
+
+#################################
+vim /etc/nginx/conf.d/app01.conf
+#################################
+server {
+    listen 8081 ssl;
+   #server_name app01.lab.local;
+
+    ssl_certificate     /etc/nginx/ssl/star.crt;
+    ssl_certificate_key /etc/nginx/ssl/star.key;
+
+     # --- SECURITY: SSL Hardening ---
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305";
+
+    # --- SECURITY: Security Headers ---
+    add_header X-Frame-Options "SAMEORIGIN" always;           # Prevents Clickjacking
+    add_header X-Content-Type-Options "nosniff" always;       # Prevents MIME-sniffing
+    add_header X-XSS-Protection "1; mode=block" always;       # XSS Filter
+
+    # Enable micro-cache
+    proxy_cache microcache;
+    proxy_cache_valid 200 10s;
+    proxy_cache_valid 404 1s;
+
+    # Cache bypass for dynamic requests
+    proxy_cache_bypass $cookie_session;
+    add_header X-Cache-Status $upstream_cache_status; # Debugging helper
+
+    # LOGGING CONFIGURATION
+    access_log /var/log/nginx/app01_access.log main;
+    # Levels: debug < info < notice < warn < error < crit < alert < emerg
+    error_log  /var/log/nginx/app01_error.log warn;
+
+    location / {
+        proxy_pass http://app1_backend;
+        
+        # SSL Verification
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/nginx/ssl/my_internal_ca.crt;
+        proxy_ssl_verify_depth 2;
+        # Standard Headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP  $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # --- PERFORMANCE: Enable Upstream Keepalive ---
+        # HTTP 1.1 is required for keepalive
+        proxy_http_version 1.1;
+        # Clear the connection header so Nginx doesn't close it
+        proxy_set_header Connection "";
+
+        # timeouts
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 10s;
+
+        # health-check failure handling
+        proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
+    }
+}
+server {
+    listen 8081;                 # Listen on port 80 for HTTP
+   #server_name app01.lab.local;             # Accept any Host header (IP-based)
+
+    return 301 https://$host$request_uri;
+}
+
+#################################
+vim /etc/nginx/conf.d/app02.conf
+#################################
+server {
+    listen 8082 ssl;
+    http2 on;
+   #server_name app02.lab.local;
+
+    ssl_certificate     /etc/nginx/ssl/star.crt;
+    ssl_certificate_key /etc/nginx/ssl/star.key;
+
+    # --- SECURITY: SSL Hardening ---
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305";
+
+    # --- SECURITY: Security Headers ---
+    add_header X-Frame-Options "SAMEORIGIN" always;           # Prevents Clickjacking
+    add_header X-Content-Type-Options "nosniff" always;       # Prevents MIME-sniffing
+    add_header X-XSS-Protection "1; mode=block" always;       # XSS Filter
+    
+    # Enable micro-cache
+    proxy_cache microcache;
+    proxy_cache_valid 200 10s;
+    proxy_cache_valid 404 1s;
+
+    # Cache bypass for dynamic requests
+    proxy_cache_bypass $cookie_session;
+    add_header X-Cache-Status $upstream_cache_status; # Debugging helper
+
+    # LOGGING CONFIGURATION
+    access_log /var/log/nginx/app01_access.log main;
+    # Levels: debug < info < notice < warn < error < crit < alert < emerg
+    error_log  /var/log/nginx/app01_error.log warn;
+
+    location / {
+        proxy_pass https://app2_backend;
+        
+        # SSL Verification
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/nginx/ssl/my_internal_ca.crt;
+        proxy_ssl_verify_depth 2;
+
+        # Standard Headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP  $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # --- PERFORMANCE: Enable Upstream Keepalive ---
+        # HTTP 1.1 is required for keepalive
+        proxy_http_version 1.1;
+        # Clear the connection header so Nginx doesn't close it
+        proxy_set_header Connection "";
+
+        # timeouts
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 10s;
+
+        # health-check failure handling
+        proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
+    }
+}
+
+##################################
+vim /etc/nginx/conf.d/app03.conf
+##################################
+server {
+    listen 8083 ssl;
+    http2 on;
+   server_name app03.lab.local;
+
+    ssl_certificate     /etc/nginx/ssl/star.crt;
+    ssl_certificate_key /etc/nginx/ssl/star.key;
+ 
+    # --- SECURITY: SSL Hardening ---
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305";
+
+    # --- SECURITY: Security Headers ---
+    add_header X-Frame-Options "SAMEORIGIN" always;           # Prevents Clickjacking
+    add_header X-Content-Type-Options "nosniff" always;       # Prevents MIME-sniffing
+    add_header X-XSS-Protection "1; mode=block" always;       # XSS Filter
+
+    # Enable micro-cache
+    proxy_cache microcache;
+    proxy_cache_valid 200 10s;
+    proxy_cache_valid 404 1s;
+
+    # Cache bypass for dynamic requests
+    proxy_cache_bypass $cookie_session;
+    add_header X-Cache-Status $upstream_cache_status; # Debugging helper
+
+    # LOGGING CONFIGURATION
+    access_log /var/log/nginx/app01_access.log main;
+    # Levels: debug < info < notice < warn < error < crit < alert < emerg
+    error_log  /var/log/nginx/app01_error.log warn;
+
+    location / {
+        proxy_pass https://app3_backend;
+
+        # SSL Verification
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/nginx/ssl/my_internal_ca.crt;
+        proxy_ssl_verify_depth 2;
+
+        # Standard Headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP  $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # --- PERFORMANCE: Enable Upstream Keepalive ---
+        # HTTP 1.1 is required for keepalive
+        proxy_http_version 1.1;
+        # Clear the connection header so Nginx doesn't close it
+        proxy_set_header Connection "";
+
+        # timeouts
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 10s;
+
+        # health-check failure handling
+        proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
+    }
+}
+
+
+############################
+LOG ROTATION
+vim /etc/logrotate.d/nginx
+############################
+/var/log/nginx/*.log {
+    # Check rotation criteria daily
+    daily
+    
+    # Keep logs for 30 days (Default 14 is too short for audits)
+    rotate 30
+    
+    # SAFETY: If a log file grows >100MB, rotate it immediately 
+    # (even if the day isn't over). Prevents disk filling during attacks.
+    maxsize 100M
+    
+    # Compress old logs (gzip) to save space
+    compress
+    
+    # Don't compress the most recent rotated file immediately
+    # (Prevents issues if Nginx is still writing to it)
+    delaycompress
+    
+    # Do not rotate empty files
+    notifempty
+    
+    # Permissions for the new file
+    create 0640 www-data adm
+    
+    # USABILITY: Appends date to file (e.g., app01_access.log-20231201.gz)
+    # instead of numbers (.1.gz, .2.gz). Much easier to search!
+    dateext
+    
+    # Run the postrotate script ONCE after rotating all files, 
+    # not once per file.
+    sharedscripts
+    
+    # The standard way to reload logs without killing Nginx
+    postrotate
+        if [ -f /var/run/nginx.pid ]; then
+            kill -USR1 `cat /var/run/nginx.pid`
+        fi
+    endscript
+}
+logrotate -d /etc/logrotate.d/nginx
