@@ -1,10 +1,13 @@
-#########Add track script
+# Keepalived HA Failover - Production Setup Guide
+
+######################################################################
+# 1. CREATE NGINX HEALTH CHECK SCRIPT
+######################################################################
 sudo useradd -r -s /bin/false -d /var/lib/keepalived -c "keepalived script user" keepalived_script
 sudo mkdir -p /usr/local/libexec/keepalived
 
 sudo vim /usr/local/libexec/keepalived/chk_nginx.sh
     #!/bin/bash
-
     if pidof nginx > /dev/null; then
       exit 0
     else
@@ -13,89 +16,87 @@ sudo vim /usr/local/libexec/keepalived/chk_nginx.sh
 
 sudo chown root:keepalived_script /usr/local/libexec/keepalived/chk_nginx.sh
 sudo chmod 0754 /usr/local/libexec/keepalived/chk_nginx.sh
-sudo chmod +x /usr/local/libexec/keepalived/chk_nginx.sh
-sudo systemctl deamon-reload
-sudo systemctl restart keepalived
-sudo systemctl status keepalived
 
 ######################################################################
-sudo vim /etc/keepalived/keepalived.conf
-# Global Settings
+# 2. KEEPALIVED CONFIG
+# sudo vim /etc/keepalived/keepalived.conf
+# NOTE: Change router_id, unicast IPs, priority, and auth_pass per node
+######################################################################
 global_defs {
-    router_id LB01                  # Unique per node
-    enable_traps                    # Enable SNMP traps (optional)
+    router_id LB01                  # Unique per node (LB01 / LB02)
+    enable_traps
     script_user root
     enable_script_security
 }
 
-# Nginx Health-Check Script
 vrrp_script chk_nginx {
     script "/usr/local/libexec/keepalived/chk_nginx.sh"
     interval 3          # Check every 3 seconds
     fall 3              # Mark failed after 3 failures
     rise 2              # Recover after 2 successes
-    weight 50           # Add/remove 50 priority
+    weight 50           # Adjust priority by ±50 on state change
 }
 
-# VRRP Instance (Floating IP)
 vrrp_instance VI_SITE {
-    state MASTER                   # MASTER on this node
-    interface enp0s8               # NIC to bind VIP
-    virtual_router_id 51           # Must match on peer
-    priority 101                   # Higher = preferred master
-    advert_int 1                   # Advertise every 1 sec
+    state MASTER                    # MASTER on LB01, BACKUP on LB02
+    interface enp0s8                # NIC to bind VIP
+    virtual_router_id 51            # Must match on both nodes
+    priority 101                    # LB01: 101 | LB02: 100
+    advert_int 1
 
-    # Unicast mode (MATCHES peer entry)
-    unicast_src_ip 192.168.56.101      # This node’s real IP
+    unicast_src_ip 192.168.56.101   # This node's real IP
     unicast_peer {
-        192.168.56.102                 # Peer LB real IP
+        192.168.56.102              # Peer node's real IP
     }
-    
-    # Authentication
+
     authentication {
-        auth_type PASS  # can use AH (IPSec Authentication Header) in the same Network
-        auth_pass tDHjh7by # change
+        auth_type PASS
+        auth_pass <change_this>     # Must match on both nodes
     }
 
-    # VIP used by clients
     virtual_ipaddress {
-        192.168.56.200/24             # Floating IP
+        192.168.56.200/24           # Floating VIP
     }
 
-    # Track health-check scripts
     track_script {
         chk_nginx
     }
 
-    # tracking of interface states
     track_interface {
-        enp0s8  # NIC to Track
+        enp0s8
     }
 }
 
-sudo systemctl deamon-reload
+######################################################################
+# 3. APPLY AND VERIFY
+######################################################################
+sudo systemctl daemon-reload
 sudo systemctl restart keepalived
 sudo systemctl status keepalived
+ip addr show enp0s8                 # Verify VIP is assigned on MASTER
 
-###########optimize kernel parameter
-sudo vim /etc/sysctl.conf
-###add the kernel parameter
-    net.ipv4.ip_forward=1
-    net.ipv4.conf.all.arp_ignore=1
-    net.ipv4.conf.all.arp_announce=2
-    net.ipv4.conf.default.arp_ignore=1
-    net.ipv4.conf.default.arp_announce=2
+######################################################################
+# 4. KERNEL PARAMETERS
+# sudo vim /etc/sysctl.conf
+######################################################################
+net.ipv4.ip_forward=1
+net.ipv4.conf.all.arp_ignore=1
+net.ipv4.conf.all.arp_announce=2
+net.ipv4.conf.default.arp_ignore=1
+net.ipv4.conf.default.arp_announce=2
 
-sudo sysctl -p   #to apply the change
+sudo sysctl -p                      # Apply changes
 
-#############add security using acl
+######################################################################
+# 5. IPTABLES - RESTRICT VRRP TRAFFIC
+######################################################################
+# Add rules
 sudo iptables -A INPUT -p vrrp -s 192.168.56.0/24 -j ACCEPT
 sudo iptables -A INPUT -p vrrp -j DROP
 sudo iptables-save > /etc/iptables/rules.v4
 sudo iptables -L -v -n
 
-########to remove security acl
+# Remove rules (if needed)
 sudo iptables -D INPUT -p vrrp -s 192.168.56.0/24 -j ACCEPT
 sudo iptables -D INPUT -p vrrp -j DROP
 sudo iptables-save > /etc/iptables/rules.v4
-sudo iptables -L -v -n

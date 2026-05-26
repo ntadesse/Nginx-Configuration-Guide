@@ -30,7 +30,7 @@ TEMPLATES_DIR="${SCRIPT_DIR}/templates"
 TEMPLATE_CONF="${TEMPLATES_DIR}/app.conf"
 TEMPLATE_UPSTREAM="${TEMPLATES_DIR}/upstream.conf"
 
-NGINX_HOST="${NGINX_HOST:-vagrant@192.168.56.10}"
+NGINX_HOST="${NGINX_HOST:-user@192.168.56.10}"
 NGINX_CONF_DIR="/etc/nginx/conf.d"
 
 # Safety Check: Templates must exist in the specified directory
