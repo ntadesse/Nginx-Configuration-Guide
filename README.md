@@ -38,13 +38,15 @@ Production-ready configuration for a high-availability Nginx reverse proxy and l
 
 ```
 nginx-configuration/
-├── nginx.conf                        # Main Nginx configuration
-├── upstream.conf                     # Upstream backend template
-├── app.conf                          # Virtual host template (SSL + proxy)
-├── cache.conf                        # Proxy micro-cache configuration
-├── configure-nginx.sh                # Automated remote deployment script
-├── prod-nginx-lb-configuration.txt   # Full production setup guide
-└── prod keepalived.conf.txt          # Keepalived VRRP setup guide
+├── nginx/
+│   ├── nginx.conf                        # Main Nginx configuration
+│   └── conf.d/
+│       ├── app.conf                      # Virtual host template (SSL + proxy)
+│       ├── cache.conf                    # Proxy micro-cache configuration
+│       └── upstream.conf                 # Upstream backend template
+├── configure-nginx.sh                    # Automated remote deployment script
+├── prod-nginx-lb-configuration.txt       # Full production setup guide
+└── prod keepalived.conf.txt              # Keepalived VRRP setup guide
 ```
 
 ---
@@ -151,4 +153,4 @@ ip addr show enp0s8
 - Replace placeholder IPs with your actual network addresses
 - SSL certificates must be placed at `/etc/nginx/ssl/` before starting Nginx
 - For Debian-based systems: `chown www-data:www-data /var/cache/nginx/microcache`
-- For RHEL-based systems: `chown www-data:nginx /var/cache/nginx/microcache`
+- For RHEL-based systems: `chown nginx:nginx /var/cache/nginx/microcache`
