@@ -72,7 +72,7 @@ Notes:
 ./configure-nginx.sh app1 app1_upstream 8081
 
 # Override target host
-NGINX_HOST=vagrant@192.168.56.101 ./configure-nginx.sh app1 app1_upstream 8081
+NGINX_HOST=user@192.168.56.101 ./configure-nginx.sh app1 app1_upstream 8081
 ```
 
 ---
