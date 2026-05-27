@@ -23,10 +23,10 @@ Production-ready Nginx reverse proxy and load balancer with automatic failover u
              +--------------------+--------------------+
                                   |
                                   v
-                    +-------------+---------------+
-                    |       Backend Servers        |
+                    +-------------+-----------------+
+                    |       Backend Servers         |
                     |  app1/app2/app3: 192.168.56.10|
-                    +------------------------------+
+                    +-------------------------------+
 ```
 
 ---
