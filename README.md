@@ -7,23 +7,26 @@ Production-ready Nginx reverse proxy and load balancer with automatic failover u
 ## Architecture
 
 ```
-                        ┌─────────────────────────────┐
-                        │   Floating VIP              │
-                        │   192.168.56.200            │
-                        └────────────┬────────────────┘
-                                     │
-               ┌─────────────────────┴─────────────────────┐
-               │                                           │
-     ┌─────────▼──────────┐                    ┌───────────▼───────────┐
-     │  LB01 (MASTER)     │◄──── VRRP ────────►│  LB02 (BACKUP)        │
-     │  192.168.56.101    │    Unicast         │  192.168.56.102       │
-     │  Priority: 101     │                    │  Priority: 100        │
-     └─────────┬──────────┘                    └───────────────────────┘
-               │
-     ┌─────────┴──────────────────────────┐
-     │         Backend Servers            │
-     │  app1/app2/app3: 192.168.56.10     │
-     └────────────────────────────────────┘
+                    +-----------------------------+
+                    |        Floating VIP         |
+                    |      192.168.56.200         |
+                    +-------------+---------------+
+                                  |
+             +--------------------+--------------------+
+             |                                         |
+   +---------+----------+               +-------------+---------+
+   |   LB01 (MASTER)    |<--- VRRP --->|   LB02 (BACKUP)       |
+   |   192.168.56.101   |   Unicast    |   192.168.56.102      |
+   |   Priority: 101    |              |   Priority: 100       |
+   +---------+----------+               +-------------+---------+
+             |                                         |
+             +--------------------+--------------------+
+                                  |
+                                  v
+                    +-------------+---------------+
+                    |       Backend Servers        |
+                    |  app1/app2/app3: 192.168.56.10|
+                    +------------------------------+
 ```
 
 ---
@@ -69,7 +72,7 @@ Notes:
 ./configure-nginx.sh app1 app1_upstream 8081
 
 # Override target host
-NGINX_HOST=user@192.168.56.101 ./configure-nginx.sh app1 app1_upstream 8081
+NGINX_HOST=vagrant@192.168.56.101 ./configure-nginx.sh app1 app1_upstream 8081
 ```
 
 ---
@@ -86,7 +89,9 @@ curl http://127.0.0.1:8080/nginx_status        # Nginx metrics
 
 ---
 
-## Security Notes
+## Notes
 - Replace `auth_pass` in `keepalived.conf` before deploying
 - Place SSL certificates at `/etc/nginx/ssl/` before starting Nginx
 - Set cache dir ownership: `nginx:nginx` (RHEL) or `www-data:www-data` (Debian)
+- The script is developed for RHEL-based Linux. For Debian-based systems, replace `firewalld` with `ufw` and `SELinux` with `AppArmor` or remove it.
+- Nginx configuration syntax requires Nginx 1.26+. If you are running an older version, some directives (e.g., `http2 on`) may need to be adjusted
